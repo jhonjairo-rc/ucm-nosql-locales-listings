@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Datos (opcional, pero recomendado si son pesados)
+data/raw/*
+data/processed/*
+!data/.gitkeep
+
+# Jupyter
+.ipynb_checkpoints/
