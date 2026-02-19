@@ -1,8 +1,5 @@
 # Bases de Datos NoSQL — Entregable
 
-**Máster NTIC — Universidad Complutense de Madrid**
-**Módulo 5 — Uso de las Bases de Datos NoSQL**
-
 ---
 
 ## Estructura del proyecto
@@ -186,194 +183,200 @@ erDiagram
 
 #### a. Total de locales y terrazas por distrito y barrio
 
-```javascript
-db.locales.aggregate([
-  {
-    $group: {
-      _id: { distrito: "$desc_distrito_local", barrio: "$desc_barrio_local" },
-      total_locales:  { $sum: 1 },
-      total_terrazas: { $sum: { $cond: [{ $ifNull: ["$terraza", false] }, 1, 0] } }
+```python
+pipeline_4a = [
+    {
+        "$group": {
+            "_id": {
+                "distrito": "$desc_distrito_local",
+                "barrio":   "$desc_barrio_local"
+            },
+            "total_locales":  {"$sum": 1},
+            "total_terrazas": {
+                "$sum": {"$cond": [{"$ne": ["$terraza.id_terraza", None]}, 1, 0]}
+            }
+        }
+    },
+    {"$sort": {"total_locales": -1}},
+    {"$limit": 10},
+    {
+        "$project": {
+            "_id":            0,
+            "distrito":       "$_id.distrito",
+            "barrio":         "$_id.barrio",
+            "total_locales":  1,
+            "total_terrazas": 1
+        }
     }
-  },
-  { $sort: { total_locales: -1 } }
-])
+]
+resultados_4a = list(col_locales.aggregate(pipeline_4a))
 ```
 
-**Explicación:** Se agrupa por distrito y barrio. Para contar terrazas se usa `$ifNull` que devuelve `true` si el campo `terraza` existe y no es nulo (campo embebido), sumando 1 en ese caso.
+**Explicación:** Se agrupa por distrito y barrio. Muchos locales no tienen terrazas, pero en nuestro modelo embedido todos los locales tienen terraza, aunque todos sus valores estén a NULL, por eso que en la condición para sumar la terraza se añade que la `PK` no tiene que ser igual a None. Se añade top 15, para tener controlado el output de la query, y evitar que la consulta devuelva cientos de registros.
 
 #### b. Tipos de licencia y cantidad por tipo
 
-```javascript
-db.locales.aggregate([
-  { $unwind: { path: "$licencias", preserveNullAndEmptyArrays: false } },
-  {
-    $group: {
-      _id: "$licencias.desc_tipo_licencia",
-      cantidad: { $sum: 1 }
-    }
-  },
-  { $match: { _id: { $ne: null } } },
-  { $sort: { cantidad: -1 } }
-])
+```python
+pipeline_4b = [
+    {"$unwind": {"path": "$licencias", "preserveNullAndEmptyArrays": False}},
+    {
+        "$group": {
+            "_id":    "$licencias.desc_tipo_licencia",
+            "cantidad": {"$sum": 1}
+        }
+    },
+    {"$match": {"_id": {"$ne": None}}},
+    {"$sort": {"cantidad": -1}},
+    {"$project": {"_id": 0, "tipo_licencia": "$_id", "cantidad": 1}}
+]
+resultados_4b = list(col_locales.aggregate(pipeline_4b))
 ```
 
 **Explicación:** `$unwind` desanida el array `licencias`. El `preserveNullAndEmptyArrays: false` excluye locales sin licencias. Se agrupa por tipo de licencia contando ocurrencias.
 
 #### c. Locales con licencia "En trámite"
 
-```javascript
-db.locales.aggregate([
-  {
-    $match: {
-      "licencias.desc_tipo_situacion_licencia": {
-        $regex: /en\s+tr[aá]mite/i
-      }
-    }
-  },
-  { $unwind: "$licencias" },
-  {
-    $match: {
-      "licencias.desc_tipo_situacion_licencia": { $regex: /en\s+tr[aá]mite/i }
-    }
-  },
-  {
-    $project: {
-      id_local: 1, rotulo: 1,
-      distrito: "$desc_distrito_local",
-      barrio:   "$desc_barrio_local",
-      ref_licencia:    "$licencias.ref_licencia",
-      tipo_licencia:   "$licencias.desc_tipo_licencia",
-      estado_licencia: "$licencias.desc_tipo_situacion_licencia",
-      tiene_terraza:   { $cond: [{ $ifNull: ["$terraza", false] }, true, false] }
-    }
-  }
-])
+```python
+import re
+pipeline_4c = [
+    {
+        "$match": {
+            "licencias.desc_tipo_situacion_licencia": {
+                "$regex": re.compile(r"en\s+tr[aá]mit", re.IGNORECASE)
+            }
+        }
+    },
+    {"$unwind": "$licencias"},
+    {
+        "$match": {
+            "licencias.desc_tipo_situacion_licencia": {
+                "$regex": re.compile(r"en\s+tr[aá]mit", re.IGNORECASE)
+            }
+        }
+    },
+    {
+        "$project": {
+            "_id":             0,
+            "id_local":        1,
+            "rotulo":          1,
+            "distrito":        "$desc_distrito_local",
+            "barrio":          "$desc_barrio_local",
+            "ref_licencia":    "$licencias.ref_licencia",
+            "tipo_licencia":   "$licencias.desc_tipo_licencia",
+            "estado_licencia": "$licencias.desc_tipo_situacion_licencia",
+            "tiene_terraza":   {"$cond": [{"$ne": ["$terraza.id_terraza", None]}, True, False]}
+        }
+    },
+    {"$limit": 10}
+]
+resultados_4c = list(col_locales.aggregate(pipeline_4c))
 ```
 
-**Explicación:** Se usa `$regex` con flag `i` (case-insensitive) y patrón `tr[aá]mite` para capturar variantes con y sin tilde. El doble `$match` (antes y después de `$unwind`) optimiza el filtrado reduciendo documentos antes de desanidar.
+**Explicación:** Se usa `$regex` con flag `i` (case-insensitive) y patrón `tr[aá]mit` para capturar variantes con y sin tilde. El doble `$match` (antes y después de `$unwind`) optimiza el filtrado reduciendo documentos antes de desanidar.
+> **Nota** Revisando los datos, la situación de la licencia viene como `En tramitación` y no en `En trámite`, como lo dice el enunciado.
 
 #### d. Consulta por sección, división y epígrafe
 
-```javascript
-db.locales.aggregate([
-  {
-    $match: {
-      actividades: {
-        $elemMatch: {
-          $and: [
-            { id_seccion: "I" },
-            { id_division: "55" }
-          ]
+```python
+pipeline_4d_general = [
+    {"$unwind": {"path": "$actividades", "preserveNullAndEmptyArrays": False}},
+    
+    {
+        "$match": {
+            "$and": [
+                {"actividades.id_seccion": {"$ne": None}},
+                {"actividades.id_division": {"$ne": None}},
+                {"actividades.id_epigrafe": {"$ne": None}},
+            ]
         }
-      }
-    }
-  },
-  { $unwind: "$actividades" },
-  {
-    $match: { "actividades.id_seccion": "I", "actividades.id_division": "55" }
-  },
-  {
-    $group: {
-      _id: {
-        seccion: "$actividades.id_seccion",
-        division: "$actividades.id_division",
-        epigrafe: "$actividades.id_epigrafe",
-        desc_epi: "$actividades.desc_epigrafe"
-      },
-      total: { $sum: 1 }
-    }
-  },
-  { $sort: { total: -1 } }
-])
+    },
+    
+    {
+        "$group": {
+            "_id": {
+                "seccion":   "$actividades.id_seccion",
+                "desc_sec":  "$actividades.desc_seccion",
+                "division":  "$actividades.id_division",
+                "desc_div":  "$actividades.desc_division",
+                "epigrafe":  "$actividades.id_epigrafe",
+                "desc_epi":  "$actividades.desc_epigrafe"
+            },
+            "total_locales":  {"$sum": 1},
+            "total_terrazas": {
+                "$sum": {"$cond": [{"$ne": ["$terraza.id_terraza", None]}, 1, 0]}
+            }
+        }
+    },
+    
+    {"$sort": {"total_locales": -1}},
+    {"$limit": 10}
+]
+resultados_4d_general = list(col_locales.aggregate(pipeline_4d_general))
 ```
 
-**Explicación:** `$elemMatch` busca documentos donde al menos un elemento del array `actividades` cumpla las condiciones simultáneamente. Permite combinar filtros de sección, división y epígrafe de forma precisa.
+**Explicación:** Se usa `$unwind` para contar cada elemento del array de `actividades` como documento  y `$match` con `$and` para filtrar aquellas con sección, división o epígrafe nulos o vacíos. Finalmente, se utilizó `$group` para clasificar por estos tres campos, contabilizando los locales y terrazas reales.
 
 #### e. Actividad económica más frecuente por barrio y distrito
 
-```javascript
-db.locales.aggregate([
-  { $unwind: { path: "$actividades", preserveNullAndEmptyArrays: false } },
-  {
-    $group: {
-      _id: {
-        distrito: "$desc_distrito_local",
-        barrio:   "$desc_barrio_local",
-        actividad: "$actividades.desc_epigrafe"
-      },
-      frecuencia: { $sum: 1 }
+```python
+pipeline_4e = [
+    {"$unwind": {"path": "$actividades", "preserveNullAndEmptyArrays": False}},
+    
+    {
+        "$group": {
+            "_id": {
+                "distrito":  "$desc_distrito_local",
+                "barrio":    "$desc_barrio_local",
+                "actividad": "$actividades.desc_epigrafe"
+            },
+            "frecuencia": {"$sum": 1}
+        }
+    },
+
+    {"$sort": {"frecuencia": -1}},
+    
+    {
+        "$group": {
+            "_id": {
+                "distrito": "$_id.distrito",
+                "barrio":   "$_id.barrio"
+            },
+            "actividad_predominante": {"$first": "$_id.actividad"},
+            "frecuencia":             {"$first": "$frecuencia"}
+        }
+    },
+    {"$sort": {"_id.distrito": 1, "_id.barrio": 1}},
+    {"$limit": 10},
+    {
+        "$project": {
+            "_id":                    0,
+            "distrito":               "$_id.distrito",
+            "barrio":                 "$_id.barrio",
+            "actividad_predominante": 1,
+            "frecuencia":             1
+        }
     }
-  },
-  { $sort: { frecuencia: -1 } },
-  {
-    $group: {
-      _id: { distrito: "$_id.distrito", barrio: "$_id.barrio" },
-      actividad_predominante: { $first: "$_id.actividad" },
-      frecuencia: { $first: "$frecuencia" }
-    }
-  },
-  { $sort: { "_id.distrito": 1, "_id.barrio": 1 } }
-])
+]
+resultados_4e = list(col_locales.aggregate(pipeline_4e))
 ```
 
-**Explicación:** La estrategia de "doble agrupación" es clave: primero se agrupa por `(distrito, barrio, actividad)` para contar frecuencias, luego se ordena descendentemente y se aplica un segundo `$group` con `$first`, que tras el sort previo devuelve la actividad más frecuente de cada zona.
+**Explicación:** La "doble agrupación" perimite: primero se agrupa por `(distrito, barrio, actividad)` para contar frecuencias, luego se ordena descendentemente y se aplica un segundo `$group` con `$first`, que tras el sort previo devuelve la actividad más frecuente de cada zona.
 
 #### f. Actualización de horarios (criterio elegido: hostelería en barrio Cortes)
 
-```javascript
-db.locales.updateMany(
-  {
-    desc_barrio_local: { $regex: /cortes/i },
-    "actividades.id_seccion": "I"
-  },
-  {
-    $set: {
-      hora_apertura1: "13:00",
-      hora_cierre2:   "01:00"
+```python
+resultado_update = col_locales.update_many(
+    filter=filtro_4f,
+    update={
+        "$set": {
+            "hora_apertura1": "13:00",
+            "hora_cierre2":   "01:00"
+        }
     }
-  }
 )
 ```
 
-**Criterio y justificación:** Se seleccionan los locales del barrio "Cortes" (distrito Centro) con actividad de hostelería (sección I del IAE). Este criterio es geográfico y comercial: el barrio de las Cortes es una zona céntrica con alta concentración de restauración, y el horario 13:00–01:00 responde a un patrón realista de apertura en tarde/noche para establecimientos hosteleros del centro histórico. Simula una actualización normativa de horarios.
-
-### Índices creados y análisis de rendimiento
-
-#### a. Índice simple sobre `desc_barrio_local`
-
-```javascript
-db.locales.createIndex({ desc_barrio_local: 1 }, { name: "idx_barrio" })
-```
-
-| Métrica | Sin índice | Con índice |
-|---------|-----------|------------|
-| Stage | COLLSCAN | IXSCAN |
-| Docs examinados | ~9,500 (muestra 20%) | Solo docs del barrio |
-| Mejora | Requiere escanear toda la colección | Salta directamente a entradas del barrio |
-
-**Análisis:** El índice simple convierte una búsqueda por barrio de O(n) a O(log n). La mejora es especialmente notable cuando el barrio buscado representa una fracción pequeña de la colección total.
-
-#### b. Índice compuesto sobre `desc_distrito_local` + `desc_barrio_local`
-
-```javascript
-db.locales.createIndex(
-  { desc_distrito_local: 1, desc_barrio_local: 1 },
-  { name: "idx_distrito_barrio" }
-)
-```
-
-**Análisis:** El orden de los campos sigue la regla del prefijo más selectivo a menos selectivo. Las consultas que filtran solo por distrito también aprovechan este índice (prefijo izquierdo). Las que filtran solo por barrio deberían usar el índice simple. El índice compuesto es ideal para las consultas de agregación por `(distrito, barrio)` como las del apartado 4a.
-
-#### c. Índice de array sobre `actividades.desc_epigrafe`
-
-```javascript
-db.locales.createIndex(
-  { "actividades.desc_epigrafe": 1 },
-  { name: "idx_actividades_epigrafe" }
-)
-```
-
-**Análisis:** MongoDB crea automáticamente un índice multikey cuando el campo indexado es un array. Esto permite buscar documentos que contengan un epígrafe específico de forma eficiente, sin necesidad de desanidar el array. Fundamental para las consultas del apartado 4d.
+**Criterio y justificación:** Se seleccionan los locales del barrio "San Andres" con actividad de hostelería (sección I). El criterio fue el barrio que tiene mas locales.
 
 ### Modelo v2 — Extensión con Airbnb
 
@@ -382,9 +385,8 @@ db.locales.createIndex(
 Los alojamientos Airbnb se almacenan en una **colección separada** (`listings`) por las siguientes razones:
 
 1. **Identidad propia:** Los alojamientos son entidades independientes (tienen `host_id`, `price`, `room_type`, `amenities`).
-2. **Volumen independiente:** 16,313 listings vs ~9,500 locales (muestra 20%) — no hay correspondencia 1:1.
-3. **Queries diferenciadas:** Las consultas sobre listings son distintas a las de locales (precio, habitaciones, reseñas).
-4. **Relación por distrito:** La integración se realiza a nivel de consulta usando el campo común de distrito, no como subdocumento embebido.
+2. **Queries diferenciadas:** Las consultas sobre listings son distintas a las de locales (precio, habitaciones, reseñas).
+3. **Relación por distrito:** La integración se realiza a nivel de consulta usando el campo común de distrito, no como subdocumento embebido.
 
 #### Diagrama del modelo v2
 
