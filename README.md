@@ -22,7 +22,7 @@
 | `terrazas202312.json` | 6,788 | Terrazas autorizadas asociadas a locales |
 | `airbnb_listings.json` | 16,313 | Alojamientos Airbnb en Madrid |
 
-> **Nota:** Toda la exploración (análisis, limpieza y procesamiento) se hizo con el 100% de los datos. La exportación para locales se tomó una muestra del 20% y para listings (alojamientos) el 100% de los datos. Estos ficheros ya procesados son los se importan a MongoDB como Colecciones.
+> **Nota:** Toda la exploración (análisis, limpieza y procesamiento) se hizo con el 100% de los datos. Para la exportación de locales se tomó una muestra del 20% y para listings (alojamientos) el 100% de los datos. Estos ficheros ya procesados son los que se importan a MongoDB como Colecciones.
 
 ### Hallazgos principales de la exploración
 
